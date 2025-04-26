@@ -252,6 +252,237 @@ Tapez <span class="text-warning">aide</span> pour afficher la liste des commande
                     } else {
                         addResponse('Erreur: Aucun prompt fourni. Usage: ai "prompt"');
                     }
+                } else if (command.startsWith('analyser ')) {
+                    const parts = command.substring(9).trim().split(/\s+--type\s+/);
+                    const text = parts[0].trim();
+                    const type = parts.length > 1 ? parts[1].trim() : 'sentiment';
+                    
+                    if (text) {
+                        addResponse('Analyse en cours...');
+                        
+                        fetch('/api/analyze', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ text: text, type: type }),
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.error) {
+                                addResponse(`Erreur: ${data.error}`);
+                            } else {
+                                if (type === 'sentiment') {
+                                    let result = `Sentiment: ${data.sentiment}\n`;
+                                    result += `Score: ${data.score}\n`;
+                                    result += `Explication: ${data.explanation}`;
+                                    if (data.offline_mode) {
+                                        result += "\n\nNote: Analyse effectuée en mode hors ligne avec une précision limitée.";
+                                    }
+                                    addResponse(result);
+                                } else if (type === 'summary') {
+                                    addResponse(data.summary);
+                                } else if (type === 'entities') {
+                                    let result = "Entités extraites:\n\n";
+                                    for (const [category, entities] of Object.entries(data.entities)) {
+                                        if (entities.length > 0) {
+                                            result += `${category}: ${entities.join(', ')}\n`;
+                                        }
+                                    }
+                                    if (data.offline_mode) {
+                                        result += "\n\nNote: Extraction effectuée en mode hors ligne avec une précision limitée.";
+                                    }
+                                    addResponse(result);
+                                } else {
+                                    addResponse(JSON.stringify(data, null, 2));
+                                }
+                            }
+                        })
+                        .catch(error => {
+                            addResponse(`Erreur: ${error.message}`);
+                        });
+                    } else {
+                        addResponse('Erreur: Aucun texte fourni. Usage: analyser "texte" [--type sentiment|summary|entities]');
+                    }
+                } else if (command.startsWith('système')) {
+                    const parts = command.split(/\s+--type\s+/);
+                    const type = parts.length > 1 ? parts[1].trim() : 'all';
+                    
+                    addResponse('Récupération des informations système...');
+                    
+                    fetch(`/api/system?type=${type}`, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            addResponse(`Erreur: ${data.error}`);
+                        } else {
+                            let result = "Informations système:\n\n";
+                            if (type === 'all') {
+                                // Afficher toutes les informations
+                                result += "CPU:\n";
+                                result += `  Utilisation: ${data.cpu.percent}%\n`;
+                                result += `  Cœurs: ${data.cpu.cores}\n\n`;
+                                
+                                result += "Mémoire:\n";
+                                result += `  Total: ${data.memory.total}\n`;
+                                result += `  Utilisée: ${data.memory.used} (${data.memory.percent}%)\n\n`;
+                                
+                                result += "Disque:\n";
+                                result += `  Total: ${data.disk.total}\n`;
+                                result += `  Utilisé: ${data.disk.used} (${data.disk.percent}%)\n\n`;
+                                
+                                result += "Réseau:\n";
+                                for (const [interface, stats] of Object.entries(data.network)) {
+                                    result += `  ${interface}: ${stats.address}\n`;
+                                }
+                            } else {
+                                // Afficher les informations spécifiques
+                                result += JSON.stringify(data, null, 2);
+                            }
+                            addResponse(result);
+                        }
+                    })
+                    .catch(error => {
+                        addResponse(`Erreur: ${error.message}`);
+                    });
+                } else if (command.startsWith('ping ')) {
+                    const parts = command.split(/\s+/);
+                    const host = parts[1];
+                    let count = 4;
+                    
+                    // Rechercher l'option --count
+                    for (let i = 2; i < parts.length - 1; i++) {
+                        if (parts[i] === '--count' || parts[i] === '-c') {
+                            count = parseInt(parts[i+1]);
+                            break;
+                        }
+                    }
+                    
+                    if (host) {
+                        addResponse(`Envoi de ${count} requêtes ping à ${host}...`);
+                        
+                        fetch('/api/network/ping', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ host: host, count: count }),
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.error) {
+                                addResponse(`Erreur: ${data.error}`);
+                            } else {
+                                let result = `Ping vers ${host}:\n\n`;
+                                
+                                // Afficher chaque résultat individuel
+                                data.results.forEach((ping, index) => {
+                                    if (ping.success) {
+                                        result += `${index+1}: ${ping.time} ms\n`;
+                                    } else {
+                                        result += `${index+1}: Timeout\n`;
+                                    }
+                                });
+                                
+                                // Afficher le résumé
+                                result += `\nRésumé: ${data.summary.success}/${data.summary.total} paquets reçus, `;
+                                result += `${data.summary.loss_percent}% de perte\n`;
+                                
+                                if (data.summary.success > 0) {
+                                    result += `Temps min/moy/max: ${data.summary.min_time}/${data.summary.avg_time}/${data.summary.max_time} ms`;
+                                }
+                                
+                                addResponse(result);
+                            }
+                        })
+                        .catch(error => {
+                            addResponse(`Erreur: ${error.message}`);
+                        });
+                    } else {
+                        addResponse('Erreur: Aucun hôte fourni. Usage: ping exemple.com [--count nombre]');
+                    }
+                } else if (command.startsWith('http ')) {
+                    const parts = command.substring(5).trim().split(/\s+--method\s+/);
+                    const url = parts[0].trim();
+                    const method = parts.length > 1 ? parts[1].trim() : 'GET';
+                    
+                    if (url) {
+                        addResponse(`Envoi d'une requête ${method} à ${url}...`);
+                        
+                        fetch('/api/network/http', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ url: url, method: method }),
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.error) {
+                                addResponse(`Erreur: ${data.error}`);
+                            } else {
+                                let result = `Requête ${method} vers ${url}:\n\n`;
+                                result += `Status: ${data.status_code} ${data.status_text}\n\n`;
+                                
+                                result += "En-têtes:\n";
+                                for (const [key, value] of Object.entries(data.headers)) {
+                                    result += `${key}: ${value}\n`;
+                                }
+                                
+                                result += "\nContenu (première partie):\n";
+                                // Limiter la taille de l'affichage du contenu
+                                const contentPreview = data.content.substring(0, 500);
+                                result += contentPreview;
+                                
+                                if (data.content.length > 500) {
+                                    result += "\n\n[Contenu tronqué...]";
+                                }
+                                
+                                addResponse(result);
+                            }
+                        })
+                        .catch(error => {
+                            addResponse(`Erreur: ${error.message}`);
+                        });
+                    } else {
+                        addResponse('Erreur: Aucune URL fournie. Usage: http https://exemple.com [--method GET|POST]');
+                    }
+                } else if (command.startsWith('code ')) {
+                    const parts = command.substring(5).trim().split(/\s+--language\s+/);
+                    const description = parts[0].trim();
+                    const language = parts.length > 1 ? parts[1].trim() : 'python';
+                    
+                    if (description) {
+                        addResponse(`Génération de code ${language} en cours...`);
+                        
+                        fetch('/api/generate', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ 
+                                prompt: `Génère du code ${language} pour la tâche suivante. Retourne uniquement le code, sans explication:\n\n${description}` 
+                            }),
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.error) {
+                                addResponse(`Erreur: ${data.error}`);
+                            } else {
+                                addResponse(`Code ${language}:\n\n${data.result}`);
+                            }
+                        })
+                        .catch(error => {
+                            addResponse(`Erreur: ${error.message}`);
+                        });
+                    } else {
+                        addResponse('Erreur: Aucune description fournie. Usage: code "description" [--language python|javascript|etc]');
+                    }
                 } else {
                     addResponse('Commande non reconnue. Tapez "aide" pour voir la liste des commandes disponibles.');
                 }
